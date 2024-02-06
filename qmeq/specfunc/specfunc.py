@@ -50,6 +50,41 @@ def func_pauli(Ecb, mu, T, Dm, Dp, itype):
         rez = np.zeros(2)
     return rez
 
+def func_lambshift(Ecb, mu, T, Dm, Dp, itype):
+    """
+    Function used when generating unitary part Lindblad master equation kernel.
+
+    Parameters
+    ----------
+    Ecb : float
+        Energy.
+    mu : float
+        Chemical potential.
+    T : float
+        Temperature.
+    Dm,Dp : float
+        Bandwidth.
+    itype : int
+        Type of function calculation.
+
+    Returns
+    -------
+    float
+        | corresponding to principle value part for Lamb shift
+    """
+    alpha = (Ecb-mu)/T
+    Rm, Rp = (Dm-mu)/T, (Dp-mu)/T
+    
+    
+    if itype == 1 or itype == 0: # only approximated principal value integrals by digamma fct
+        rez = -digamma(0.5+1.0j*alpha/(2*pi)).real #- log(abs(Rm)/(2*pi))
+        if itype == 0:
+            print('A little warning: Lambshift contributions are approximated by Digamma function and not the full integral.')
+        #rez = 0
+    else:
+        rez = 0
+    return rez
+
 
 def func_1vN(Ecb, mu, T, Dm, Dp, itype, limit):
     """

@@ -6,7 +6,7 @@ import itertools
 from ...wrappers.mytypes import complexnp
 from ...wrappers.mytypes import doublenp
 
-from ...specfunc.specfunc import func_pauli
+from ...specfunc.specfunc import func_pauli, func_lambshift # added function to calculate Lambshift
 from ..aprclass import Approach
 
 
@@ -21,10 +21,16 @@ class ApproachLindblad(Approach):
         Approach.prepare_arrays(self)
         Tba, mtype = self.leads.Tba, self.leads.mtype
         self.tLba = np.zeros(Tba.shape, dtype=mtype)
+        
+        # added Lambshift Hamiltonian
+        self.HLS = np.zeros(Tba.shape, dtype=mtype) 
 
     def clean_arrays(self):
         Approach.clean_arrays(self)
         self.tLba.fill(0.0)
+        
+        # added Lambshift Hamiltonian
+        self.HLS.fill(0.0)
 
     def generate_fct(self):
         """
@@ -34,6 +40,8 @@ class ApproachLindblad(Approach):
         ----------
         tLba : array
             (Modifies) Jump operator matrix in many-body basis.
+        HLS  : array
+            (Modifies) Lamb shift Hamiltonian
         """
         Tba, E, si = self.leads.Tba, self.qd.Ea, self.si
         mulst, tlst, dlst = self.leads.mulst, self.leads.tlst, self.leads.dlst
@@ -41,6 +49,9 @@ class ApproachLindblad(Approach):
         ncharge, nleads, statesdm = si.ncharge, si.nleads, si.statesdm
 
         tLba = self.tLba
+        HLS = self.HLS # added Lambshift Hamiltonian
+        
+        
         for charge in range(ncharge-1):
             bcharge = charge+1
             acharge = charge
@@ -50,11 +61,52 @@ class ApproachLindblad(Approach):
                     fct1, fct2 = func_pauli(Eba, mulst[l], tlst[l], dlst[l, 0], dlst[l, 1], itype)
                     tLba[l, b, a] = np.sqrt(fct1)*Tba[l, b, a]
                     tLba[l, a, b] = np.sqrt(fct2)*Tba[l, a, b]
+                    
+         #-----------------
+         # building Lambshift Hamiltonian
+        
+        if itype == 2 or itype == 3:
+            print('Warning: Lambshift NOT considered')
+            HLS.fill(0.0)
+            
+        else:
+            print('Lambshift included')
+            for charge in range(ncharge-2):
+                ccharge = charge+2
+                bcharge = charge+1
+                acharge = charge
+
+                for b, bp in itertools.product(statesdm[bcharge], statesdm[bcharge]):
+                    for l in range(nleads):
+                        fctLS_a = 0
+                        fctLS_c = 0
+
+                        for a in statesdm[acharge]:
+                            Eba = E[b]-E[a]
+                            Ebpa = E[bp]-E[a]
+                           
+                            fctLS_ba = func_lambshift(Eba,  mulst[l], tlst[l], dlst[l, 0], dlst[l, 1], itype)
+                            fctLS_abp = func_lambshift(Ebpa, mulst[l], tlst[l], dlst[l, 0], dlst[l, 1], itype)
+                            fctLS_a += 0.5 * Tba[l, b, a] * Tba[l, a, bp] * (fctLS_ba + fctLS_abp)
+
+                        for c in statesdm[ccharge]:
+                            Ebc = E[b] - E[c]
+                            Ebpc = E[bp]-E[c]
+                           
+                            fctLS_bc = func_lambshift(Ebc, -mulst[l], tlst[l], dlst[l, 0], dlst[l, 1], itype)
+                            fctLS_cbp = func_lambshift(Ebpc,-mulst[l], tlst[l], dlst[l, 0], dlst[l, 1], itype)
+                            fctLS_c += 0.5 * Tba[l, b, c] * Tba[l, c, bp] * (fctLS_bc + fctLS_cbp)
+
+                        HLS[l,b,bp] =  (fctLS_a + fctLS_c)
+                        HLS[l,bp,b] = HLS[l,b,bp].conjugate()
+         #-----------------
+            
 
     def generate_coupling_terms(self, b, bp, bcharge):
         tLba = self.tLba
         si, kh = self.si, self.kernel_handler
         nleads, statesdm = si.nleads, si.statesdm
+        HLS = self.HLS # Lamb shift
 
         acharge = bcharge-1
         ccharge = bcharge+1
@@ -75,6 +127,11 @@ class ApproachLindblad(Approach):
                 for c in statesdm[ccharge]:
                     for l in range(nleads):
                         fct_bppbp += -0.5*tLba[l, c, b].conjugate()*tLba[l, c, bpp]
+                        
+                # adding Lamb shift to kernel element
+                for l in range(nleads):
+                    fct_bppbp += 1j * HLS[l,b,bpp]
+                
                 kh.set_matrix_element(1j*fct_bppbp, b, bp, bcharge, bpp, bp, bcharge)
             # --------------------------------------------------
             if kh.is_included(b, bpp, bcharge):
@@ -85,6 +142,10 @@ class ApproachLindblad(Approach):
                 for c in statesdm[ccharge]:
                     for l in range(nleads):
                         fct_bbpp += -0.5*tLba[l, c, bpp].conjugate()*tLba[l, c, bp]
+                # adding Lamb shift to kernel element
+                for l in range(nleads):
+                    fct_bbpp -= 1j * HLS[l,bpp,bp]
+                    
                 kh.set_matrix_element(1j*fct_bbpp, b, bp, bcharge, b, bpp, bcharge)
         # --------------------------------------------------
         for c, cp in itertools.product(statesdm[ccharge], statesdm[ccharge]):
